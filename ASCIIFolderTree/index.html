@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Treeline — ASCII Folder Trees</title>
+<style>
+  :root {
+    --bg: #14181f;
+    --panel: #1b212b;
+    --panel-2: #222936;
+    --line: #2d3646;
+    --text: #e6e9ef;
+    --muted: #8b95a7;
+    --accent: #7ee0a8;
+    --accent-ink: #0d2216;
+    --folder: #f2c36b;
+    --danger: #ff7b7b;
+    --drop: #5aa9ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
+    min-height: 100vh; display: flex; justify-content: center; padding: 28px 16px;
+  }
+  .app { width: 100%; max-width: 860px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  h1 { margin: 0; font-family: var(--mono); font-size: 22px; letter-spacing: -.5px; }
+  h1 span { color: var(--accent); }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+
+  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+  nav button {
+    background: none; border: 0; color: var(--muted); font: 500 14px var(--sans);
+    padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  nav button:hover { color: var(--text); }
+  nav button.active { color: var(--accent); border-color: var(--accent); }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+  }
+  .card-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+  .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    font: 500 13px var(--sans); color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .hint { padding: 9px 16px; font-size: 12.5px; color: var(--muted); background: var(--panel-2); border-bottom: 1px solid var(--line); }
+  .foot { padding: 10px 16px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); }
+
+  /* editor */
+  #tree { padding: 10px 8px 6px; min-height: 120px; font-size: 14px; }
+  .row {
+    position: relative; display: flex; align-items: center; gap: 4px; height: 32px;
+    border-radius: 6px; padding-right: 6px;
+  }
+  .row:hover { background: var(--panel-2); }
+  .grip { cursor: grab; color: var(--muted); width: 18px; text-align: center; user-select: none; letter-spacing: -2px; font-size: 14px; }
+  .grip:active { cursor: grabbing; }
+  .caret { width: 18px; text-align: center; color: var(--muted); cursor: pointer; user-select: none; font-size: 11px; }
+  .caret.empty { visibility: hidden; }
+  .icon { font-family: var(--mono); font-size: 12px; width: 22px; text-align: center; user-select: none; }
+  .folder .icon { color: var(--folder); }
+  .file .icon { color: var(--muted); }
+  .name { flex: 1; font-family: var(--mono); cursor: text; padding: 2px 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .name-input {
+    flex: 1; font: inherit; font-family: var(--mono); color: var(--text); background: var(--bg);
+    border: 1px solid var(--accent); border-radius: 4px; padding: 2px 4px; outline: none; min-width: 0;
+  }
+  .name { flex: 0 1 auto; }
+  .desc { flex: 1; font-family: var(--mono); font-size: 13px; color: var(--accent); cursor: text; padding: 2px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 40px; }
+  .desc.blank { color: var(--muted); opacity: 0; }
+  .row:hover .desc.blank { opacity: .7; }
+  .name-input.n { flex: 0 1 220px; }
+  .row-actions { display: none; gap: 4px; }
+  .row:hover .row-actions { display: flex; }
+  .mini {
+    font: 12px var(--sans); background: var(--bg); color: var(--muted); border: 1px solid var(--line);
+    border-radius: 4px; padding: 2px 7px; cursor: pointer;
+  }
+  .mini:hover { color: var(--text); border-color: var(--muted); }
+  .mini.del:hover { color: var(--danger); border-color: var(--danger); }
+  .row.dragging { opacity: .35; }
+  .row.drop-inside { background: rgba(90,169,255,.18); outline: 1px dashed var(--drop); }
+  .row.drop-before::before, .row.drop-after::after {
+    content: ""; position: absolute; left: 0; right: 0; height: 2px; background: var(--drop);
+  }
+  .row.drop-before::before { top: -1px; }
+  .row.drop-after::after { bottom: -1px; }
+  #rootDrop { height: 36px; }
+  #rootDrop.over { border-top: 2px solid var(--drop); }
+  .empty-msg { color: var(--muted); text-align: center; padding: 30px 10px; font-size: 14px; }
+
+  /* upload */
+  .upload-body { padding: 18px; }
+  .dropzone {
+    border: 2px dashed var(--line); border-radius: 10px; padding: 42px 20px; text-align: center;
+    color: var(--muted); transition: .15s;
+  }
+  .dropzone.over { border-color: var(--accent); background: rgba(126,224,168,.07); color: var(--text); }
+  .dropzone .big { font-family: var(--mono); font-size: 30px; color: var(--accent); margin-bottom: 8px; }
+  .dropzone p { margin: 6px 0 16px; font-size: 14px; }
+  .opts { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 16px; font-size: 13px; color: var(--muted); }
+  label.chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  input[type=checkbox] { accent-color: var(--accent); }
+  .create-opt { padding: 16px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 14px; }
+  .create-opt h3 { margin: 0 0 6px; font-size: 14px; }
+  .create-opt p { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+  .note { margin-top: 10px; font-size: 12.5px; color: var(--folder); }
+  textarea#pasteText {
+    width: 100%; min-height: 180px; resize: vertical; font: 13px/1.5 var(--mono); color: var(--text);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; outline: none; white-space: pre;
+  }
+  textarea#pasteText:focus { border-color: var(--accent); }
+  code { font-family: var(--mono); font-size: 12px; color: var(--text); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .status { margin-top: 12px; font-size: 13px; color: var(--accent); min-height: 18px; }
+
+  /* preview */
+  pre#out {
+    margin: 0; padding: 18px; font: 14px/1.5 var(--mono); color: var(--text);
+    overflow: auto; white-space: pre; min-height: 160px; max-height: 65vh;
+  }
+  .toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--accent); color: var(--accent-ink); font-weight: 600; font-size: 13px;
+    padding: 8px 16px; border-radius: 20px; opacity: 0; pointer-events: none; transition: .2s;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>tree<span>line</span></h1>
+    <p>Build, import and export ASCII folder trees. Works fully offline.</p>
+  </header>
+
+  <nav id="tabs">
+    <button data-tab="editor" class="active">Editor</button>
+    <button data-tab="upload">Import</button>
+    <button data-tab="preview">ASCII output</button>
+    <button data-tab="create">Create on disk</button>
+  </nav>
+
+  <!-- Editor -->
+  <section id="tab-editor" class="card">
+    <div class="card-head">
+      <h2>Structure</h2>
+      <div class="actions">
+        <button class="btn primary" id="addRoot">+ Root folder</button>
+        <button class="btn" id="clearAll">Clear</button>
+        <button class="btn" id="toPreview">Preview →</button>
+      </div>
+    </div>
+    <div class="hint">Drag the <b>⋮⋮</b> handle: drop on a row's top/bottom edge to reorder, or on its middle to move into a folder.</div>
+    <div id="tree"></div>
+    <div class="foot">Double-click a name to rename; click the <b>#</b> text to add a description. Hover a row to add children or delete. Press Enter to confirm, Esc to cancel.</div>
+  </section>
+
+  <!-- Upload -->
+  <section id="tab-upload" class="card" hidden>
+    <div class="card-head"><h2>Import a folder or ASCII tree</h2></div>
+    <div class="upload-body">
+      <div class="dropzone" id="dropzone">
+        <div class="big">[ ↑ ]</div>
+        <p>Drop a folder here, or choose one. Nothing is uploaded — it's read locally in your browser.</p>
+        <button class="btn primary" id="pickFolder">Choose folder…</button>
+        <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+      </div>
+      <div class="opts">
+        <label class="chk"><input type="checkbox" id="ignoreCommon" checked> Skip node_modules, .git, .DS_Store</label>
+        <label class="chk"><input type="checkbox" id="replaceTree" checked> Replace current tree (otherwise append)</label>
+      </div>
+      <div class="status" id="uploadStatus"></div>
+
+      <div class="create-opt" style="margin-top:20px">
+        <h3>Paste an ASCII tree</h3>
+        <p>Paste text you copied from the ASCII output (or from <code>tree</code>). Connector style, indent width and <code># descriptions</code> are detected automatically. Names ending in <code>/</code>, or with children, become folders; other lines become files.</p>
+        <textarea id="pasteText" spellcheck="false" placeholder="└─ my-project/&#10;   ├─ src/   # Source code&#10;   └─ README.md"></textarea>
+        <div class="actions" style="margin-top:10px">
+          <button class="btn primary" id="importText">Import text</button>
+          <label class="chk" style="font-size:13px;color:var(--muted)"><input type="checkbox" id="replaceText" checked> Replace current tree</label>
+        </div>
+        <div class="status" id="textStatus"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Create -->
+  <section id="tab-create" class="card" hidden>
+    <div class="card-head"><h2>Create this structure on disk</h2></div>
+    <div class="upload-body">
+      <div class="create-opt">
+        <h3>Write directly into a folder</h3>
+        <p>Pick a destination folder and the tree is created inside it (empty files, existing files are never overwritten). Needs a Chromium browser such as Chrome or Edge.</p>
+        <button class="btn primary" id="writeDir">Choose folder &amp; create…</button>
+        <div class="note" id="fsaNote"></div>
+      </div>
+      <div class="create-opt">
+        <h3>Download a script or zip</h3>
+        <p>Works in any browser. Run the script from the folder where the tree should be created, or extract the zip there.</p>
+        <div class="actions">
+          <button class="btn" id="dlSh">Bash script (.sh)</button>
+          <button class="btn" id="dlPs">PowerShell (.ps1)</button>
+          <button class="btn" id="dlZip">Zip (.zip)</button>
+        </div>
+      </div>
+      <div class="status" id="createStatus"></div>
+    </div>
+  </section>
+
+  <!-- Preview -->
+  <section id="tab-preview" class="card" hidden>
+    <div class="card-head">
+      <h2>ASCII output</h2>
+      <div class="actions">
+        <label class="chk" style="font-size:13px;color:var(--muted)"><input type="checkbox" id="optSlash" checked> Trailing /</label>
+        <label class="chk" style="font-size:13px;color:var(--muted)"><input type="checkbox" id="optSort"> Folders first</label>
+        <label class="chk" style="font-size:13px;color:var(--muted)"><input type="checkbox" id="optAscii"> Plain ASCII (+- |)</label>
+        <button class="btn" id="savePng">Save PNG</button>
+        <button class="btn primary" id="copyBtn">Copy</button>
+      </div>
+    </div>
+    <pre id="out"></pre>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = s => document.querySelector(s);
+  let uid = 0;
+  const mk = (name, type, children, desc) => ({ id: ++uid, name, type, desc: desc || '', open: true, children: type === 'folder' ? (children || []) : null });
+
+  // ---- State ---------------------------------------------------------
+  let roots = [
+    (() => {
+      const r = mk('my-project', 'folder', [
+        mk('src', 'folder', [
+          mk('components', 'folder', [mk('Button.tsx', 'file'), mk('Card.tsx', 'file', null, 'Content container')], 'Reusable UI'),
+          mk('app.tsx', 'file', null, 'Entry point'),
+        ]),
+        mk('package.json', 'file'),
+        mk('README.md', 'file'),
+      ]);
+      return r;
+    })()
+  ];
+  let editingId = null, editingField = 'name';
+  let dragId = null;
+
+  // ---- Tree helpers --------------------------------------------------
+  function locate(id, list = roots, parent = null) {
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].id === id) return { list, index: i, node: list[i], parent };
+      if (list[i].children) {
+        const r = locate(id, list[i].children, list[i]);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+  const contains = (node, id) => node.children && node.children.some(c => c.id === id || contains(c, id));
+
+  // ---- Editor rendering ---------------------------------------------
+  function render() {
+    const host = $('#tree');
+    host.innerHTML = '';
+    if (!roots.length) {
+      const m = document.createElement('div');
+      m.className = 'empty-msg';
+      m.textContent = 'Empty tree. Add a root folder or import a folder.';
+      host.appendChild(m);
+    }
+    roots.forEach(n => renderNode(n, 0, host));
+    const rd = document.createElement('div');
+    rd.id = 'rootDrop';
+    rd.addEventListener('dragover', e => { if (dragId) { e.preventDefault(); rd.classList.add('over'); } });
+    rd.addEventListener('dragleave', () => rd.classList.remove('over'));
+    rd.addEventListener('drop', e => {
+      e.preventDefault(); rd.classList.remove('over');
+      move(dragId, null, 'end');
+    });
+    host.appendChild(rd);
+    if (editingId !== null) {
+      const inp = host.querySelector('.name-input');
+      if (inp) { inp.focus(); inp.select(); }
+    }
+  }
+
+  function renderNode(node, depth, host) {
+    const isFolder = node.type === 'folder';
+    const row = document.createElement('div');
+    row.className = 'row ' + node.type;
+    row.dataset.id = node.id;
+    row.style.paddingLeft = (depth * 22) + 'px';
+
+    const grip = document.createElement('span');
+    grip.className = 'grip'; grip.textContent = '⋮⋮'; grip.draggable = true; grip.title = 'Drag to move';
+    grip.addEventListener('dragstart', e => {
+      dragId = node.id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(node.id));
+      e.dataTransfer.setDragImage(row, 10, 16);
+      setTimeout(() => row.classList.add('dragging'), 0);
+    });
+    grip.addEventListener('dragend', () => { dragId = null; render(); });
+
+    const caret = document.createElement('span');
+    caret.className = 'caret' + (isFolder && node.children.length ? '' : ' empty');
+    caret.textContent = node.open ? '▾' : '▸';
+    caret.addEventListener('click', () => { node.open = !node.open; render(); });
+
+    const icon = document.createElement('span');
+    icon.className = 'icon'; icon.textContent = isFolder ? (node.open ? '▣' : '■') : '▤';
+
+    row.append(grip, caret, icon);
+
+    const editor = (field, cls, clean) => {
+      const inp = document.createElement('input');
+      inp.className = 'name-input ' + cls; inp.value = node[field];
+      if (field === 'desc') inp.placeholder = 'description';
+      let done = false;
+      const finish = ok => {
+        if (done) return; done = true;
+        const v = clean(inp.value);
+        if (ok && (v || field === 'desc')) node[field] = v;
+        editingId = null; editingField = 'name'; render();
+      };
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') finish(true);
+        else if (e.key === 'Escape') finish(false);
+      });
+      inp.addEventListener('blur', () => finish(true));
+      return inp;
+    };
+    const editing = editingId === node.id;
+    if (editing && editingField === 'name') {
+      row.appendChild(editor('name', 'n', v => v.trim().replace(/[\/\\]+$/, '')));
+    } else {
+      const nm = document.createElement('span');
+      nm.className = 'name'; nm.textContent = node.name;
+      nm.addEventListener('dblclick', () => { editingId = node.id; editingField = 'name'; render(); });
+      row.appendChild(nm);
+    }
+    if (editing && editingField === 'desc') {
+      row.appendChild(editor('desc', 'd', v => v.replace(/[\r\n]+/g, ' ').trim()));
+    } else {
+      const ds = document.createElement('span');
+      ds.className = 'desc' + (node.desc ? '' : ' blank');
+      ds.textContent = node.desc ? '# ' + node.desc : '# add description';
+      ds.title = 'Click to edit description';
+      ds.addEventListener('click', () => { editingId = node.id; editingField = 'desc'; render(); });
+      row.appendChild(ds);
+    }
+
+    const acts = document.createElement('span');
+    acts.className = 'row-actions';
+    if (isFolder) {
+      acts.appendChild(btn('+ Folder', () => addChild(node, 'folder')));
+      acts.appendChild(btn('+ File', () => addChild(node, 'file')));
+    }
+    const del = btn('✕', () => { const r = locate(node.id); r.list.splice(r.index, 1); render(); });
+    del.classList.add('del'); del.title = 'Delete';
+    acts.appendChild(del);
+    row.appendChild(acts);
+
+    // drop target
+    row.addEventListener('dragover', e => {
+      if (!dragId || dragId === node.id) return;
+      const src = locate(dragId);
+      if (!src || contains(src.node, node.id)) return;
+      e.preventDefault();
+      clearMarks(); row.classList.add('drop-' + zone(e, row, isFolder));
+    });
+    row.addEventListener('dragleave', e => { if (!row.contains(e.relatedTarget)) clearMarks(); });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      const z = zone(e, row, isFolder);
+      clearMarks();
+      move(dragId, node.id, z);
+    });
+
+    host.appendChild(row);
+    if (isFolder && node.open) node.children.forEach(c => renderNode(c, depth + 1, host));
+  }
+
+  function btn(label, fn) {
+    const b = document.createElement('button');
+    b.className = 'mini'; b.textContent = label;
+    b.addEventListener('click', e => { e.stopPropagation(); fn(); });
+    return b;
+  }
+  function clearMarks() {
+    document.querySelectorAll('.drop-before,.drop-after,.drop-inside').forEach(el =>
+      el.classList.remove('drop-before', 'drop-after', 'drop-inside'));
+  }
+  function zone(e, row, isFolder) {
+    const r = row.getBoundingClientRect();
+    const y = (e.clientY - r.top) / r.height;
+    if (isFolder) return y < 0.25 ? 'before' : y > 0.75 ? 'after' : 'inside';
+    return y < 0.5 ? 'before' : 'after';
+  }
+  function move(id, targetId, where) {
+    const src = locate(id);
+    if (!src) return;
+    if (targetId === null) {
+      src.list.splice(src.index, 1); roots.push(src.node);
+    } else {
+      const t = locate(targetId);
+      if (!t || t.node === src.node || contains(src.node, targetId)) return;
+      src.list.splice(src.index, 1);
+      const t2 = locate(targetId); // indices may have shifted
+      if (where === 'inside') { t2.node.children.push(src.node); t2.node.open = true; }
+      else t2.list.splice(t2.index + (where === 'after' ? 1 : 0), 0, src.node);
+    }
+    dragId = null; render();
+  }
+  function addChild(parent, type) {
+    const n = mk(type === 'folder' ? 'new-folder' : 'new-file.txt', type);
+    parent.children.push(n); parent.open = true; editingId = n.id; render();
+  }
+
+  $('#addRoot').onclick = () => {
+    const n = mk('new-folder', 'folder'); roots.push(n); editingId = n.id; render();
+  };
+  $('#clearAll').onclick = () => { if (!roots.length || confirm('Remove everything from the tree?')) { roots = []; render(); } };
+  $('#toPreview').onclick = () => showTab('preview');
+
+  // ---- ASCII generation ---------------------------------------------
+  function sortList(list, folderFirst) {
+    if (!folderFirst) return list;
+    return [...list].sort((a, b) => (a.type === b.type ? 0 : a.type === 'folder' ? -1 : 1));
+  }
+  function buildAscii() {
+    const slash = $('#optSlash').checked, fFirst = $('#optSort').checked, plain = $('#optAscii').checked;
+    const T = plain ? { mid: '+- ', last: '`- ', bar: '|  ' } : { mid: '├─ ', last: '└─ ', bar: '│  ' };
+    const gap = '   ';
+    const lines = [];
+    const walk = (list, prefix) => {
+      sortList(list, fFirst).forEach((n, i, arr) => {
+        const last = i === arr.length - 1;
+        lines.push({
+          text: prefix + (last ? T.last : T.mid) + n.name + (n.type === 'folder' && slash ? '/' : ''),
+          desc: n.desc
+        });
+        if (n.type === 'folder') walk(n.children, prefix + (last ? gap : T.bar));
+      });
+    };
+    walk(roots, '');
+    // align all descriptions in one column, two spaces after the longest line that has one
+    const len = s => [...s].length;
+    const col = Math.max(0, ...lines.filter(l => l.desc).map(l => len(l.text))) + 2;
+    return lines.map(l => l.desc ? l.text + ' '.repeat(col - len(l.text)) + '# ' + l.desc : l.text).join('\n');
+  }
+  function refreshOut() { $('#out').textContent = buildAscii() || '(empty tree)'; }
+  ['#optSlash', '#optSort', '#optAscii'].forEach(s => $(s).addEventListener('change', refreshOut));
+
+  function toast(msg) {
+    const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 1600);
+  }
+  $('#copyBtn').onclick = async () => {
+    const text = buildAscii();
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (_) {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    }
+    toast('Copied to clipboard');
+  };
+  $('#savePng').onclick = () => {
+    const lines = (buildAscii() || '(empty tree)').split('\n');
+    const font = '16px ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace';
+    const lh = 24, pad = 24, scale = 2;
+    const c = document.createElement('canvas'), ctx = c.getContext('2d');
+    ctx.font = font;
+    const w = Math.ceil(Math.max(...lines.map(l => ctx.measureText(l).width))) + pad * 2;
+    const h = lines.length * lh + pad * 2;
+    c.width = w * scale; c.height = h * scale;
+    ctx.scale(scale, scale);
+    ctx.fillStyle = '#14181f'; ctx.fillRect(0, 0, w, h);
+    ctx.font = font; ctx.fillStyle = '#e6e9ef'; ctx.textBaseline = 'middle';
+    lines.forEach((l, i) => ctx.fillText(l, pad, pad + i * lh + lh / 2));
+    c.toBlob(b => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b); a.download = 'folder-tree.png'; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+  };
+
+  // ---- Folder import --------------------------------------------------
+  const IGNORED = new Set(['node_modules', '.git', '.DS_Store']);
+
+  function insertPath(rootsArr, parts) {
+    let list = rootsArr;
+    parts.forEach((p, i) => {
+      const isFile = i === parts.length - 1;
+      let n = list.find(x => x.name === p && x.type === (isFile ? 'file' : 'folder'));
+      if (!n) { n = mk(p, isFile ? 'file' : 'folder'); list.push(n); }
+      if (!isFile) list = n.children;
+    });
+  }
+  function finishImport(paths) {
+    const skip = $('#ignoreCommon').checked;
+    const fresh = [];
+    let count = 0;
+    paths.forEach(p => {
+      const parts = p.split('/').filter(Boolean);
+      if (skip && parts.some(x => IGNORED.has(x))) return;
+      insertPath(fresh, parts); count++;
+    });
+    const sortRec = l => { l.sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'folder' ? -1 : 1);
+      l.forEach(n => n.children && sortRec(n.children)); };
+    sortRec(fresh);
+    roots = $('#replaceTree').checked ? fresh : roots.concat(fresh);
+    $('#uploadStatus').textContent = `Imported ${count} file${count === 1 ? '' : 's'}.`;
+    render(); refreshOut();
+    if (count) setTimeout(() => showTab('editor'), 500);
+  }
+
+  $('#pickFolder').onclick = () => $('#folderInput').click();
+  $('#folderInput').addEventListener('change', e => {
+    const files = [...e.target.files];
+    if (files.length) finishImport(files.map(f => f.webkitRelativePath || f.name));
+    e.target.value = '';
+  });
+
+  const dz = $('#dropzone');
+  ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
+  dz.addEventListener('drop', async e => {
+    const items = [...(e.dataTransfer.items || [])].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    if (!items.length) { $('#uploadStatus').textContent = 'Could not read the dropped item. Try "Choose folder…".'; return; }
+    $('#uploadStatus').textContent = 'Reading…';
+    const paths = [];
+    const readAll = r => new Promise((res, rej) => {
+      const out = [];
+      const next = () => r.readEntries(b => b.length ? (out.push(...b), next()) : res(out), rej);
+      next();
+    });
+    const walk = async (entry, prefix) => {
+      const p = prefix + entry.name;
+      if (entry.isFile) { paths.push(p); return; }
+      const kids = await readAll(entry.createReader());
+      if (!kids.length) { paths.push(p + '/'); return; }
+      for (const k of kids) await walk(k, p + '/');
+    };
+    try { for (const it of items) await walk(it, ''); finishImport(paths); }
+    catch (err) { $('#uploadStatus').textContent = 'Error reading folder: ' + err; }
+  });
+
+  // ---- Import from pasted text ---------------------------------------
+  // Indentation is measured by the column where each name starts, so any connector
+  // style (├─, ├──, +--, |--, plain spaces) and any indent width is understood.
+  const LINE = /^([\s │|]*)([├└┝┕+`|\\])[─━-]+[\s ]*(.*)$/;
+  function parseTree(text) {
+    const result = [];
+    const stack = []; // { col, node }
+    text.split(/\r?\n/).forEach(raw => {
+      if (!raw.trim()) return;
+      let col, tail;
+      const m = LINE.exec(raw);
+      if (m) { tail = m[3]; col = raw.length - tail.length; }
+      else { const lead = /^[\s │|]*/.exec(raw)[0]; tail = raw.slice(lead.length); col = lead.length; }
+      let name = tail, desc = '';
+      const d = /^(.*?)\s+#\s?(.*)$/.exec(tail);
+      if (d) { name = d[1]; desc = d[2].trim(); }
+      name = name.trim();
+      let folder = false;
+      if (/[\/\\]$/.test(name)) { folder = true; name = name.replace(/[\/\\]+$/, ''); }
+      if (!name) return;
+      while (stack.length && stack[stack.length - 1].col >= col) stack.pop();
+      const node = mk(name, folder ? 'folder' : 'file', null, desc);
+      if (stack.length) {
+        const parent = stack[stack.length - 1].node;
+        if (parent.type === 'file') { parent.type = 'folder'; parent.children = []; }
+        parent.children.push(node);
+      } else result.push(node);
+      stack.push({ col, node });
+    });
+    return result;
+  }
+  $('#importText').onclick = () => {
+    const parsed = parseTree($('#pasteText').value);
+    const st = $('#textStatus');
+    if (!parsed.length) { st.style.color = 'var(--danger)'; st.textContent = 'Nothing to import — paste a tree first.'; return; }
+    roots = $('#replaceText').checked ? parsed : roots.concat(parsed);
+    st.style.color = ''; st.textContent = '';
+    render(); refreshOut(); showTab('editor');
+  };
+
+  // ---- Create on disk -------------------------------------------------
+  function flatten() {
+    const out = [];
+    const walk = (list, base) => list.forEach(n => {
+      const parts = [...base, n.name];
+      out.push({ parts, path: parts.join('/'), dir: n.type === 'folder' });
+      if (n.type === 'folder') walk(n.children, parts);
+    });
+    walk(roots, []);
+    return out;
+  }
+  const badName = s => !s || s === '.' || s === '..' || /[\/\\\0]/.test(s);
+  function checkEntries() {
+    const items = flatten();
+    if (!items.length) { createStatus('The tree is empty.', true); return null; }
+    const bad = items.find(it => it.parts.some(badName));
+    if (bad) { createStatus(`Invalid name in "${bad.path}" (no slashes, "." or "..").`, true); return null; }
+    return items;
+  }
+  function createStatus(msg, err) {
+    const s = $('#createStatus'); s.textContent = msg; s.style.color = err ? 'var(--danger)' : 'var(--accent)';
+  }
+  function download(name, data, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([data], { type: type || 'application/octet-stream' }));
+    a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  // Direct write (File System Access API)
+  if (!('showDirectoryPicker' in window)) {
+    $('#writeDir').disabled = true;
+    $('#fsaNote').textContent = 'Not supported in this browser. Use the script or zip below.';
+  }
+  $('#writeDir').onclick = async () => {
+    const items = checkEntries(); if (!items) return;
+    let base;
+    try { base = await window.showDirectoryPicker({ mode: 'readwrite' }); }
+    catch (e) { if (e.name !== 'AbortError') createStatus('Could not open folder: ' + e.message, true); return; }
+    try {
+      let dirs = 0, files = 0;
+      for (const it of items) {
+        let h = base;
+        const dirParts = it.dir ? it.parts : it.parts.slice(0, -1);
+        for (const p of dirParts) h = await h.getDirectoryHandle(p, { create: true });
+        if (it.dir) dirs++;
+        else { await h.getFileHandle(it.parts[it.parts.length - 1], { create: true }); files++; }
+      }
+      createStatus(`Created ${dirs} folder${dirs === 1 ? '' : 's'} and ${files} file${files === 1 ? '' : 's'} in "${base.name}".`);
+    } catch (e) { createStatus('Failed: ' + e.message, true); }
+  };
+
+  // Scripts
+  $('#dlSh').onclick = () => {
+    const items = checkEntries(); if (!items) return;
+    const q = s => "'" + s.replace(/'/g, "'\\''") + "'";
+    const body = items.map(it => it.dir ? `mkdir -p -- ${q(it.path)}` : `touch -- ${q(it.path)}`);
+    download('create-tree.sh', '#!/usr/bin/env bash\nset -e\n\n' + body.join('\n') + '\n', 'text/x-shellscript');
+    createStatus('Downloaded create-tree.sh. Run it with: bash create-tree.sh');
+  };
+  $('#dlPs').onclick = () => {
+    const items = checkEntries(); if (!items) return;
+    const q = s => "'" + s.replace(/'/g, "''") + "'";
+    const body = items.map(it => it.dir
+      ? `New-Item -ItemType Directory -Force -Path ${q(it.path)} | Out-Null`
+      : `if (-not (Test-Path -LiteralPath ${q(it.path)})) { New-Item -ItemType File -Path ${q(it.path)} | Out-Null }`);
+    download('create-tree.ps1', '$ErrorActionPreference = "Stop"\r\n\r\n' + body.join('\r\n') + '\r\n', 'text/plain');
+    createStatus('Downloaded create-tree.ps1. Run it from the destination folder in PowerShell.');
+  };
+
+  // Zip (stored, no compression; entries are empty)
+  function buildZip(items) {
+    const enc = new TextEncoder();
+    const d = new Date();
+    const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    const chunks = [], central = [];
+    let offset = 0;
+    items.forEach(it => {
+      const name = enc.encode(it.path + (it.dir ? '/' : ''));
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+      lh.setUint16(10, time, true); lh.setUint16(12, date, true); lh.setUint16(26, name.length, true);
+      chunks.push(new Uint8Array(lh.buffer), name);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 0x031e, true); ch.setUint16(6, 20, true);
+      ch.setUint16(8, 0x0800, true); ch.setUint16(12, time, true); ch.setUint16(14, date, true);
+      ch.setUint16(28, name.length, true);
+      ch.setUint32(38, ((it.dir ? 0o40755 : 0o100644) << 16) | (it.dir ? 0x10 : 0), true);
+      ch.setUint32(42, offset, true);
+      central.push(new Uint8Array(ch.buffer), name);
+      offset += 30 + name.length;
+    });
+    const cdSize = central.reduce((s, c) => s + c.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, items.length, true); end.setUint16(10, items.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    return new Blob([...chunks, ...central, new Uint8Array(end.buffer)], { type: 'application/zip' });
+  }
+  $('#dlZip').onclick = () => {
+    const items = checkEntries(); if (!items) return;
+    download('folder-tree.zip', buildZip(items), 'application/zip');
+    createStatus('Downloaded folder-tree.zip.');
+  };
+
+  // ---- Tabs -----------------------------------------------------------
+  function showTab(name) {
+    document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    ['editor', 'upload', 'create', 'preview'].forEach(t => $('#tab-' + t).hidden = t !== name);
+    if (name === 'preview') refreshOut();
+  }
+  document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+
+  render(); refreshOut();
+})();
+</script>
+</body>
+</html>
